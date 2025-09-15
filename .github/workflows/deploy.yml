@@ -32,38 +32,35 @@ jobs:
       with:
         registry-type: public
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+    - name: Build Images
+      env:
+        DOCKER_BUILDKIT: 1
+      run: |
+        # Build and tag the API image
+        docker build --pull --force-rm \
+          -t ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:${GITHUB_SHA::7} \
+          -t ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:latest \
+          -f apps/api/Dockerfile apps/api/
 
-    - name: Build and push API image
-      uses: docker/build-push-action@v5
-      with:
-        context: ./apps/api
-        file: ./apps/api/Dockerfile
-        platforms: linux/amd64
-        push: true
-        tags: |
-          ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:latest
-          ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        # Build and tag the Playwright service image
+        docker build --pull --force-rm \
+          -t ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:${GITHUB_SHA::7} \
+          -t ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:latest \
+          -f apps/playwright-service-ts/Dockerfile apps/playwright-service-ts/
 
-    - name: Build and push Playwright service image
-      uses: docker/build-push-action@v5
-      with:
-        context: ./apps/playwright-service-ts
-        file: ./apps/playwright-service-ts/Dockerfile
-        platforms: linux/amd64
-        push: true
-        tags: |
-          ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:latest
-          ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+    - name: Push Images
+      run: |
+        # Push API image
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:latest
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:${GITHUB_SHA::7}
+        
+        # Push Playwright service image
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:latest
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:${GITHUB_SHA::7}
 
     - name: Output image details
       run: |
-        echo "✅ Images built and pushed successfully!"
+        echo "✅ Clean build completed - Images built and pushed successfully!"
         echo "API Image: ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:latest"
         echo "Playwright Image: ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:latest"
-        echo "Commit SHA: ${{ github.sha }}"
+        echo "Commit SHA: ${GITHUB_SHA::7}"
