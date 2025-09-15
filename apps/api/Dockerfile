@@ -19,11 +19,14 @@ RUN cd sharedLibs/go-html-to-md && \
 FROM base AS build
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including Python for node-gyp
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
     pkg-config \
+    python3 \
+    python3-dev \
+    python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
