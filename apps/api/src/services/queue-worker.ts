@@ -38,6 +38,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
 import { BullMQOtel } from "bullmq-otel";
 import { pathToFileURL } from "url";
 import { getErrorContactMessage } from "../lib/deployment";
+import { initializeBlocklist } from "../scraper/WebScraper/utils/blocklist";
 
 configDotenv();
 
@@ -61,7 +62,9 @@ cacheableLookup.install(http.globalAgent);
 cacheableLookup.install(https.globalAgent);
 
 const shouldOtel =
-  process.env.LANGFUSE_PUBLIC_KEY || process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  process.env.LANGFUSE_PUBLIC_KEY ||
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT ||
+  process.env.HONEYCOMB_TEAM_ID;
 const otelSdk = shouldOtel
   ? new NodeSDK({
       resource: resourceFromAttributes({
@@ -76,6 +79,18 @@ const otelSdk = shouldOtel
               new BatchSpanProcessor(
                 new OTLPTraceExporter({
                   url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+                }),
+              ),
+            ]
+          : []),
+        ...(process.env.HONEYCOMB_TEAM_ID
+          ? [
+              new BatchSpanProcessor(
+                new OTLPTraceExporter({
+                  url: "https://api.honeycomb.io",
+                  headers: {
+                    "x-honeycomb-team": process.env.HONEYCOMB_TEAM_ID,
+                  },
                 }),
               ),
             ]
@@ -496,6 +511,11 @@ app.listen(workerPort, () => {
 });
 
 (async () => {
+  await initializeBlocklist().catch(e => {
+    _logger.error("Failed to initialize blocklist", { error: e });
+    process.exit(1);
+  });
+
   await Promise.all([
     workerFun(getExtractQueue(), processExtractJobInternal),
     workerFun(getDeepResearchQueue(), processDeepResearchJobInternal),

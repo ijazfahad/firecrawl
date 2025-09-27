@@ -688,7 +688,7 @@ describe("Scrape tests", () => {
           const response1 = await scrape(
             {
               url,
-              location: { country: "DE" },
+              location: { country: "DE", languages: ["hu-HU", "de-DE"] },
               maxAge: scrapeTimeout * 2,
             },
             identity,
@@ -701,7 +701,7 @@ describe("Scrape tests", () => {
           const response2 = await scrape(
             {
               url,
-              location: { country: "DE" },
+              location: { country: "DE", languages: ["de-DE", "hu-HU"] },
               maxAge: scrapeTimeout * 3,
             },
             identity,
@@ -1295,6 +1295,25 @@ describe("Scrape tests", () => {
           );
         },
         scrapeTimeout * 5,
+      );
+    });
+
+    describe("YouTube (f-e dependant)", () => {
+      it.concurrent(
+        "scrapes YouTube videos and transcripts",
+        async () => {
+          const response = await scrape(
+            {
+              url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+              formats: ["markdown"],
+            },
+            identity,
+          );
+
+          expect(response.markdown).toContain("Rick Astley");
+          expect(response.markdown).toContain("Never gonna let you down");
+        },
+        scrapeTimeout,
       );
     });
   }

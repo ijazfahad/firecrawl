@@ -2,7 +2,7 @@
   "name": "firecrawl-scraper-js",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/index.ts",
   "scripts": {
     "start": "tsc && node dist/src/harness.js --start-built",
     "dev": "tsx src/harness.ts --start",
@@ -30,7 +30,8 @@
     "mongo-docker-console": "docker exec -it mongodb mongosh",
     "run-example": "npx ts-node src/example.ts",
     "sentry:sourcemaps": "sentry-cli sourcemaps inject --org caleb-peffer --project firecrawl-scraper-js ./dist && sentry-cli sourcemaps upload --org caleb-peffer --project firecrawl-scraper-js ./dist",
-    "prepare": "cd ../.. && husky ./apps/api/.husky"
+    "prepare": "cd ../.. && husky ./apps/api/.husky",
+    "knip": "knip"
   },
   "author": "",
   "license": "ISC",
@@ -55,7 +56,6 @@
     "supertest": "^6.3.3",
     "ts-jest": "^29.1.1",
     "ts-node": "^10.9.1",
-    "ts-prune": "^0.10.3",
     "tsc-watch": "^7.1.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
@@ -71,13 +71,15 @@
     "@apidevtools/json-schema-ref-parser": "^11.7.3",
     "@bull-board/api": "^6.11.2",
     "@bull-board/express": "^6.11.2",
-    "@dqbd/tiktoken": "^1.0.17",
+    "@coinbase/x402": "^0.6.4",
+    "@dqbd/tiktoken": "^1.0.22",
     "@google-cloud/storage": "^7.16.0",
     "@mendable/firecrawl-rs": "workspace:*",
     "@openrouter/ai-sdk-provider": "^0.4.5",
     "@opentelemetry/auto-instrumentations-node": "^0.62.0",
     "@opentelemetry/core": "^2.0.1",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.203.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.205.0",
     "@opentelemetry/resources": "^2.0.1",
     "@opentelemetry/sdk-node": "^0.203.0",
     "@opentelemetry/sdk-trace-node": "^2.0.1",
@@ -90,7 +92,7 @@
     "ai": "^4.3.4",
     "ajv": "^8.16.0",
     "async-mutex": "^0.5.0",
-    "axios": "^1.11.0",
+    "axios": "^1.12.2",
     "body-parser": "^1.20.3",
     "bullmq": "^5.56.7",
     "bullmq-otel": "^1.0.1",
@@ -112,10 +114,9 @@
     "langfuse": "^3.38.4",
     "langfuse-vercel": "^3.38.4",
     "lodash": "^4.17.21",
-    "mammoth": "^1.7.2",
     "marked": "^14.1.2",
     "ollama-ai-provider": "^1.2.0",
-    "openai": "^5.20.0",
+    "openai": "^5.20.2",
     "parse-diff": "^0.11.1",
     "pdf-parse": "^1.1.1",
     "pg": "^8.16.3",
@@ -125,6 +126,7 @@
     "rate-limiter-flexible": "2.4.2",
     "redlock": "5.0.0-beta.2",
     "resend": "^3.4.0",
+    "response-time": "^2.3.4",
     "robots-parser": "^3.0.1",
     "stripe": "^16.1.0",
     "systeminformation": "^5.27.8",
@@ -135,7 +137,7 @@
     "uuid": "^10.0.0",
     "winston": "^3.14.2",
     "ws": "^8.18.0",
-    "x402-express": "^0.5.3",
+    "x402-express": "^0.6.1",
     "xml2js": "^0.6.2",
     "zod": "^3.24.2"
   },
@@ -148,21 +150,27 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@mendable/firecrawl-rs",
       "@sentry-internal/node-cpu-profiler",
+      "@sentry/cli",
       "bigint-buffer",
       "bufferutil",
+      "esbuild",
       "keccak",
+      "koffi",
       "libpq",
+      "msgpackr-extract",
+      "protobufjs",
+      "supabase",
       "utf-8-validate",
-      "supabase"
+      "wordpos"
     ],
     "overrides": {
       "brace-expansion@>=2.0.0 <=2.0.1": "2.0.2"
     }
   },
   "lint-staged": {
-    "*.{js,jsx,ts,tsx,json,css,md}": "prettier --write",
-    "*.{js,tsx,ts,tsx}": "ts-prune --skip \"native/\" --error"
+    "*.{js,jsx,ts,tsx,json,css,md}": "prettier --write"
   },
-  "packageManager": "pnpm@10.15.1"
+  "packageManager": "pnpm@10.16.1"
 }

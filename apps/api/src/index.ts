@@ -37,8 +37,11 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
+import { OTLPTraceExporter as OTLPHTTPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { nuqShutdown } from "./services/worker/nuq";
 import { getErrorContactMessage } from "./lib/deployment";
+import { initializeBlocklist } from "./scraper/WebScraper/utils/blocklist";
+import responseTime from "response-time";
 
 const { createBullBoard } = require("@bull-board/api");
 const { BullMQAdapter } = require("@bull-board/api/bullMQAdapter");
@@ -56,7 +59,9 @@ cacheableLookup.install(http.globalAgent);
 cacheableLookup.install(https.globalAgent);
 
 const shouldOtel =
-  process.env.LANGFUSE_PUBLIC_KEY || process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  process.env.LANGFUSE_PUBLIC_KEY ||
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT ||
+  process.env.HONEYCOMB_TEAM_ID;
 const otelSdk = shouldOtel
   ? new NodeSDK({
       resource: resourceFromAttributes({
@@ -71,6 +76,18 @@ const otelSdk = shouldOtel
               new BatchSpanProcessor(
                 new OTLPTraceExporter({
                   url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+                }),
+              ),
+            ]
+          : []),
+        ...(process.env.HONEYCOMB_TEAM_ID
+          ? [
+              new BatchSpanProcessor(
+                new OTLPHTTPTraceExporter({
+                  url: "https://api.honeycomb.io",
+                  headers: {
+                    "x-honeycomb-team": process.env.HONEYCOMB_TEAM_ID,
+                  },
                 }),
               ),
             ]
@@ -95,6 +112,8 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json({ limit: "10mb" }));
 
 app.use(cors()); // Add this line to enable CORS
+
+app.use(responseTime());
 
 if (process.env.EXPRESS_TRUST_PROXY) {
   app.set("trust proxy", parseInt(process.env.EXPRESS_TRUST_PROXY, 10));
@@ -138,7 +157,14 @@ app.use(domainFrequencyRouter);
 const DEFAULT_PORT = process.env.PORT ?? 3002;
 const HOST = process.env.HOST ?? "localhost";
 
-function startServer(port = DEFAULT_PORT) {
+async function startServer(port = DEFAULT_PORT) {
+  try {
+    await initializeBlocklist();
+  } catch (error) {
+    logger.error("Failed to initialize blocklist", { error });
+    throw error;
+  }
+
   // Attach WebSocket proxy to the Express app
   attachWsProxy(app);
 
@@ -175,7 +201,10 @@ function startServer(port = DEFAULT_PORT) {
 }
 
 if (require.main === module) {
-  startServer();
+  startServer().catch(error => {
+    logger.error("Failed to start server", { error });
+    process.exit(1);
+  });
 }
 
 app.get("/is-production", (req, res) => {

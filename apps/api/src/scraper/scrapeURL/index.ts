@@ -16,6 +16,7 @@ import {
   FeatureFlag,
   getEngineMaxReasonableTime,
   scrapeURLWithEngine,
+  shouldUseIndex,
 } from "./engines";
 import { parseMarkdown } from "../../lib/html-to-markdown";
 import { hasFormatOfType } from "../../lib/format-utils";
@@ -65,6 +66,7 @@ import {
 } from "./lib/abortManager";
 import { ScrapeJobTimeoutError } from "../../lib/error";
 import { htmlTransform } from "./lib/removeUnwantedElements";
+import { postprocessors } from "./postprocessors";
 
 export type ScrapeUrlResponse =
   | {
@@ -147,13 +149,18 @@ function buildFeatureFlags(
   }
 
   const urlO = new URL(url);
+  const lowerPath = urlO.pathname.toLowerCase();
 
-  if (urlO.pathname.endsWith(".pdf")) {
+  if (lowerPath.endsWith(".pdf")) {
     flags.add("pdf");
   }
 
-  if (urlO.pathname.endsWith(".docx")) {
-    flags.add("docx");
+  if (
+    lowerPath.endsWith(".docx") ||
+    lowerPath.endsWith(".odt") ||
+    lowerPath.endsWith(".rtf")
+  ) {
+    flags.add("document");
   }
 
   if (options.blockAds === false) {
@@ -491,8 +498,12 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
                 meta.abort.throwIfAborted();
 
                 // Fallback error if above doesn't throw
+                const usingDefaultTimeout =
+                  meta.abort.scrapeTimeout() === undefined;
                 throw new ScrapeJobTimeoutError(
-                  "Scrape timed out due to maximum length of 5 minutes",
+                  usingDefaultTimeout
+                    ? "Scrape timed out due to maximum length of 5 minutes"
+                    : "Scrape timed out",
                 );
               } catch (error) {
                 reject(error);
@@ -608,34 +619,64 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
     throw new NoEnginesLeftError(fallbackList.map(x => x.engine));
   }
 
+  let engineResult: EngineScrapeResult = result.result;
+
+  for (const postprocessor of postprocessors) {
+    if (
+      postprocessor.shouldRun(
+        meta,
+        new URL(engineResult.url),
+        engineResult.postprocessorsUsed,
+      )
+    ) {
+      meta.logger.info("Running postprocessor " + postprocessor.name);
+      try {
+        engineResult = await postprocessor.run(
+          {
+            ...meta,
+            logger: meta.logger.child({
+              method: "postprocessors/" + postprocessor.name,
+            }),
+          },
+          engineResult,
+        );
+      } catch (error) {
+        meta.logger.warn("Failed to run postprocessor " + postprocessor.name, {
+          error,
+        });
+      }
+    }
+  }
+
   let document: Document = {
-    markdown: result.result.markdown,
-    rawHtml: result.result.html,
-    screenshot: result.result.screenshot,
-    actions: result.result.actions,
+    markdown: engineResult.markdown,
+    rawHtml: engineResult.html,
+    screenshot: engineResult.screenshot,
+    actions: engineResult.actions,
     metadata: {
       sourceURL: meta.internalOptions.unnormalizedSourceURL ?? meta.url,
-      url: result.result.url,
-      statusCode: result.result.statusCode,
-      error: result.result.error,
-      numPages: result.result.pdfMetadata?.numPages,
-      ...(result.result.pdfMetadata?.title
-        ? { title: result.result.pdfMetadata.title }
+      url: engineResult.url,
+      statusCode: engineResult.statusCode,
+      error: engineResult.error,
+      numPages: engineResult.pdfMetadata?.numPages,
+      ...(engineResult.pdfMetadata?.title
+        ? { title: engineResult.pdfMetadata.title }
         : {}),
-      contentType: result.result.contentType,
+      contentType: engineResult.contentType,
       proxyUsed: meta.featureFlags.has("stealthProxy") ? "stealth" : "basic",
       ...(fallbackList.find(x =>
         ["index", "index;documents"].includes(x.engine),
       )
-        ? result.result.cacheInfo
+        ? engineResult.cacheInfo
           ? {
               cacheState: "hit",
-              cachedAt: result.result.cacheInfo.created_at.toISOString(),
+              cachedAt: engineResult.cacheInfo.created_at.toISOString(),
             }
           : {
               cacheState: "miss",
             }
         : {}),
+      postprocessorsUsed: engineResult.postprocessorsUsed,
     },
   };
 
@@ -673,6 +714,8 @@ export async function scrapeURL(
     internalOptions,
     costTracking,
   );
+
+  const startTime = Date.now();
 
   meta.logger.info("scrapeURL entered");
 
@@ -776,9 +819,11 @@ export async function scrapeURL(
   }
 
   try {
+    let result: ScrapeUrlResponse;
     while (true) {
       try {
-        return await scrapeURLLoop(meta);
+        result = await scrapeURLLoop(meta);
+        break;
       } catch (error) {
         if (
           error instanceof AddFeatureError &&
@@ -831,10 +876,30 @@ export async function scrapeURL(
         }
       }
     }
+
+    meta.logger.debug("scrapeURL metrics", {
+      module: "scrapeURL/metrics",
+      timeTaken: Date.now() - startTime,
+      maxAgeValid: (meta.options.maxAge ?? 0) > 0,
+      shouldUseIndex: shouldUseIndex(meta),
+      success: result.success,
+      indexHit: result.success && result.document.metadata.cacheState === "hit",
+    });
+
+    return result;
   } catch (error) {
     // if (Object.values(meta.results).length > 0 && Object.values(meta.results).every(x => x.state === "error" && x.error instanceof FEPageLoadFailed)) {
     //   throw new FEPageLoadFailed();
     // } else
+    meta.logger.debug("scrapeURL metrics", {
+      module: "scrapeURL/metrics",
+      timeTaken: Date.now() - startTime,
+      maxAgeValid: (meta.options.maxAge ?? 0) > 0,
+      shouldUseIndex: shouldUseIndex(meta),
+      success: false,
+      indexHit: false,
+    });
+
     if (error instanceof NoEnginesLeftError) {
       meta.logger.warn("scrapeURL: All scraping engines failed!", { error });
     } else if (error instanceof LLMRefusalError) {

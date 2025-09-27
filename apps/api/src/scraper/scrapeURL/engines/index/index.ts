@@ -12,11 +12,9 @@ import {
   addIndexInsertJob,
   generateDomainSplits,
   addOMCEJob,
-  addDomainFrequencyJob,
 } from "../../../../services";
 import { EngineError, IndexMissError } from "../../error";
 import { shouldParsePDF } from "../../../../controllers/v2/types";
-import { storage } from "../../../../lib/gcs-jobs";
 
 export async function sendDocumentToIndex(meta: Meta, document: Document) {
   const shouldCache =
@@ -84,6 +82,7 @@ export async function sendDocumentToIndex(meta: Meta, document: Document) {
                 }
               : undefined,
           contentType: document.metadata.contentType,
+          postprocessorsUsed: document.metadata.postprocessorsUsed,
         });
       } catch (error) {
         meta.logger.error("Failed to save document to index", {
@@ -189,6 +188,7 @@ const errorCountToRegister = 3;
 export async function scrapeURLWithIndex(
   meta: Meta,
 ): Promise<EngineScrapeResult> {
+  const startTime = Date.now();
   const normalizedURL = normalizeURLForIndex(meta.url);
   const urlHash = hashURL(normalizedURL);
 
@@ -242,38 +242,23 @@ export async function scrapeURLWithIndex(
     }
   }
 
-  let selector = index_supabase_service
-    .from("index")
-    .select("id, created_at, status")
-    .eq("url_hash", urlHash)
-    .is("invalidated_at", null)
-    .gte("created_at", new Date(Date.now() - maxAge).toISOString())
-    .eq("is_mobile", meta.options.mobile)
-    .eq("block_ads", meta.options.blockAds);
+  const checkpoint1 = Date.now();
 
-  if (meta.featureFlags.has("screenshot")) {
-    selector = selector.eq("has_screenshot", true);
-  }
-  if (meta.featureFlags.has("screenshot@fullScreen")) {
-    selector = selector.eq("has_screenshot_fullscreen", true);
-  }
-  if (meta.options.location?.country) {
-    selector = selector.eq("location_country", meta.options.location.country);
-  } else {
-    selector = selector.is("location_country", null);
-  }
-  if (meta.options.location?.languages) {
-    selector = selector.eq(
-      "location_languages",
-      meta.options.location.languages,
-    );
-  } else {
-    selector = selector.is("location_languages", null);
-  }
-
-  const { data, error } = await selector
-    .order("created_at", { ascending: false })
-    .limit(5);
+  const { data, error } = await index_supabase_service.rpc("index_get_recent", {
+    p_url_hash: urlHash,
+    p_max_age_ms: maxAge,
+    p_is_mobile: meta.options.mobile,
+    p_block_ads: meta.options.blockAds,
+    p_feature_screenshot: meta.featureFlags.has("screenshot"),
+    p_feature_screenshot_fullscreen: meta.featureFlags.has(
+      "screenshot@fullScreen",
+    ),
+    p_location_country: meta.options.location?.country ?? null,
+    p_location_languages:
+      (meta.options.location?.languages?.length ?? 0) > 0
+        ? meta.options.location?.languages
+        : null,
+  });
 
   if (error || !data) {
     throw new EngineError("Failed to retrieve URL from DB index", {
@@ -300,8 +285,19 @@ export async function scrapeURLWithIndex(
   }
 
   if (selectedRow === null || selectedRow === undefined) {
+    meta.logger.debug("Index metrics", {
+      module: "index/metrics",
+      hit: false,
+      maxAge,
+      dynamicMaxAge: meta.options.maxAge === undefined,
+      timingsFull: Date.now() - startTime,
+      timingsMaxAge: checkpoint1 - startTime,
+      timingsSupa: Date.now() - checkpoint1,
+    });
     throw new IndexMissError();
   }
+
+  const checkpoint2 = Date.now();
 
   const id = data[0].id;
 
@@ -333,6 +329,18 @@ export async function scrapeURLWithIndex(
     }
   }
 
+  meta.logger.debug("Index metrics", {
+    module: "index/metrics",
+    hit: true,
+    age: Date.now() - new Date(selectedRow.created_at).getTime(),
+    maxAge,
+    dynamicMaxAge: meta.options.maxAge === undefined,
+    timingsFull: Date.now() - startTime,
+    timingsMaxAge: checkpoint1 - startTime,
+    timingsSupa: checkpoint2 - checkpoint1,
+    timingsGCS: Date.now() - checkpoint2,
+  });
+
   return {
     url: doc.url,
     html: doc.html,
@@ -352,6 +360,8 @@ export async function scrapeURLWithIndex(
     cacheInfo: {
       created_at: new Date(data[0].created_at),
     },
+
+    postprocessorsUsed: doc.postprocessorsUsed,
 
     proxyUsed: doc.proxyUsed ?? "basic",
   };

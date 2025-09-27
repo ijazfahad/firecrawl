@@ -907,6 +907,7 @@ export type Document = {
     cacheState?: "hit" | "miss";
     cachedAt?: string;
     creditsUsed?: number;
+    postprocessorsUsed?: string[];
     // [key: string]: string | string[] | number | { smartScrape: number; other: number; total: number } | undefined;
   };
   serpResults?: {
@@ -1065,6 +1066,7 @@ export type AuthCreditUsageChunk = {
   price_id: string | null;
   price_credits: number; // credit limit with assoicated price, or free_credits (500) if free plan
   price_should_be_graceful: boolean;
+  price_associated_auto_recharge_price_id: string | null;
   credits_used: number;
   coupon_credits: number; // do not rely on this number to be up to date after calling a billTeam
   adjusted_credits_used: number; // credits this period minus coupons used
