@@ -1,0 +1,66 @@
+name: Build and Push Firecrawl Images
+
+on:
+  push:
+    branches: [ Fahad-deployable ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: public.ecr.aws/u3l1p1m5
+  API_REPOSITORY: firecrawl-api
+  PLAYWRIGHT_REPOSITORY: firecrawl-playwright-service
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR Public
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+      with:
+        registry-type: public
+
+    - name: Build Images
+      env:
+        DOCKER_BUILDKIT: 1
+      run: |
+        # Build and tag the API image
+        docker build --pull --force-rm \
+          -t ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:${GITHUB_SHA::7} \
+          -t ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:latest \
+          -f apps/api/Dockerfile apps/api/
+
+        # Build and tag the Playwright service image
+        docker build --pull --force-rm \
+          -t ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:${GITHUB_SHA::7} \
+          -t ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:latest \
+          -f apps/playwright-service-ts/Dockerfile apps/playwright-service-ts/
+
+    - name: Push Images
+      run: |
+        # Push API image
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:latest
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:${GITHUB_SHA::7}
+        
+        # Push Playwright service image
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:latest
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:${GITHUB_SHA::7}
+
+    - name: Output image details
+      run: |
+        echo "✅ Clean build completed - Images built and pushed successfully!"
+        echo "API Image: ${{ env.ECR_REGISTRY }}/${{ env.API_REPOSITORY }}:latest"
+        echo "Playwright Image: ${{ env.ECR_REGISTRY }}/${{ env.PLAYWRIGHT_REPOSITORY }}:latest"
+        echo "Commit SHA: ${GITHUB_SHA::7}"

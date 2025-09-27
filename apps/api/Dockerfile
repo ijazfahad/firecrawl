@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-slim AS base
+FROM --platform=linux/amd64 node:22-slim AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -8,7 +8,7 @@ ENV CI=true
 RUN corepack enable
 
 # Build Go shared library
-FROM golang:1.24 AS go-build
+FROM --platform=linux/amd64 golang:1.24 AS go-build
 WORKDIR /app
 COPY sharedLibs/go-html-to-md ./sharedLibs/go-html-to-md
 
@@ -19,12 +19,14 @@ RUN cd sharedLibs/go-html-to-md && \
 FROM base AS build
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including Python for node-gyp
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
     pkg-config \
     python3 \
+    python3-dev \
+    python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
