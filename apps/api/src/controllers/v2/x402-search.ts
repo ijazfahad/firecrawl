@@ -8,7 +8,6 @@ import {
   ScrapeOptions,
   TeamFlags,
 } from "./types";
-import { billTeam } from "../../services/billing/credit_billing";
 import { v4 as uuidv4 } from "uuid";
 import { addScrapeJob, waitForJob } from "../../services/queue-jobs";
 import { logJob } from "../../services/logging/log_job";
@@ -19,7 +18,6 @@ import { logger as _logger } from "../../lib/logger";
 import type { Logger } from "winston";
 import { getJobPriority } from "../../lib/job-priority";
 import { CostTracking } from "../../lib/cost-tracking";
-import { calculateCreditsToBeBilled } from "../../lib/scrape-billing";
 import { supabase_service } from "../../services/supabase";
 import { SearchV2Response } from "../../lib/entities";
 import { ScrapeJobTimeoutError } from "../../lib/error";
@@ -42,7 +40,7 @@ interface ScrapeJobInput {
   description: string;
 }
 
-async function startScrapeJob(
+async function startX420ScrapeJob(
   searchResult: { url: string; title: string; description: string },
   options: {
     teamId: string;
@@ -61,7 +59,7 @@ async function startScrapeJob(
 
   const zeroDataRetention = flags?.forceZDR ?? false;
 
-  logger.info("Adding scrape job", {
+  logger.info("Adding scrape job [x402]", {
     scrapeId: jobId,
     url: searchResult.url,
     teamId: options.teamId,
@@ -86,12 +84,12 @@ async function startScrapeJob(
       },
       internalOptions: {
         teamId: options.teamId,
-        bypassBilling: options.bypassBilling ?? true,
+        bypassBilling: true,
         zeroDataRetention,
       },
       origin: options.origin,
       // Do not touch this flag
-      is_scrape: options.bypassBilling ?? false,
+      is_scrape: false,
       startTime: Date.now(),
       zeroDataRetention,
       apiKeyId: options.apiKeyId,
@@ -105,7 +103,7 @@ async function startScrapeJob(
   return jobId;
 }
 
-async function scrapeSearchResult(
+async function scrapeX420SearchResult(
   searchResult: { url: string; title: string; description: string },
   options: {
     teamId: string;
@@ -122,7 +120,7 @@ async function scrapeSearchResult(
 ): Promise<DocumentWithCostTracking> {
   try {
     // Start the scrape job
-    const jobId = await startScrapeJob(
+    const jobId = await startX420ScrapeJob(
       searchResult,
       options,
       logger,
@@ -133,7 +131,7 @@ async function scrapeSearchResult(
 
     const doc: Document = await waitForJob(jobId, options.timeout, false);
 
-    logger.info("Scrape job completed", {
+    logger.info("Scrape job completed [x402]", {
       scrapeId: jobId,
       url: searchResult.url,
       teamId: options.teamId,
@@ -158,7 +156,7 @@ async function scrapeSearchResult(
           .eq("job_id", jobId);
 
       if (costTrackingError) {
-        logger.error("Error getting cost tracking", {
+        logger.error("Error getting cost tracking [x402]", {
           error: costTrackingError,
         });
         throw costTrackingError;
@@ -174,7 +172,7 @@ async function scrapeSearchResult(
       costTracking,
     };
   } catch (error) {
-    logger.error(`Error in scrapeSearchResult: ${error}`, {
+    logger.error(`Error in scrapeSearchResult [x402]: ${error}`, {
       url: searchResult.url,
       teamId: options.teamId,
     });
@@ -197,21 +195,16 @@ async function scrapeSearchResult(
   }
 }
 
-export async function searchController(
+export async function x402SearchController(
   req: RequestWithAuth<{}, SearchResponse, SearchRequest>,
   res: Response<SearchResponse>,
 ) {
-  // Get timing data from middleware (includes all middleware processing time)
-  const middlewareStartTime =
-    (req as any).requestTiming?.startTime || new Date().getTime();
-  const controllerStartTime = new Date().getTime();
-
   const jobId = uuidv4();
   let logger = _logger.child({
     jobId,
     teamId: req.auth.team_id,
     module: "api/v2",
-    method: "searchController",
+    method: "x402SearchController",
     zeroDataRetention: req.acuc?.flags?.forceZDR,
   });
 
@@ -223,7 +216,7 @@ export async function searchController(
     });
   }
 
-  const middlewareTime = controllerStartTime - middlewareStartTime;
+  const startTime = new Date().getTime();
   const isSearchPreview =
     process.env.SEARCH_PREVIEW_TOKEN !== undefined &&
     process.env.SEARCH_PREVIEW_TOKEN === req.body.__searchPreviewToken;
@@ -233,8 +226,13 @@ export async function searchController(
   try {
     req.body = searchRequestSchema.parse(req.body);
 
+    // IMPORTANT NOTE: Force results to be at most 10 even if a larger limit is requested
+    const MAX_RESULTS = 10;
+    if (req.body.limit > MAX_RESULTS) {
+      req.body.limit = MAX_RESULTS;
+    }
+
     logger = logger.child({
-      version: "v2",
       query: req.body.query,
       origin: req.body.origin,
     });
@@ -244,7 +242,7 @@ export async function searchController(
     // Buffer results by 50% to account for filtered URLs
     const num_results_buffer = Math.floor(limit * 2);
 
-    logger.info("Searching for results");
+    logger.info("Searching for results [x402]");
 
     // Extract unique types from sources for the search function
     // After transformation, sources is always an array of objects
@@ -326,7 +324,7 @@ export async function searchController(
     } else {
       // Common setup for both async and sync scraping
       logger.info(
-        `Starting ${isAsyncScraping ? "async" : "sync"} search scraping`,
+        `Starting ${isAsyncScraping ? "async" : "sync"} search scraping [x402]`,
       );
 
       // Create common options
@@ -335,7 +333,7 @@ export async function searchController(
         origin: req.body.origin,
         timeout: req.body.timeout,
         scrapeOptions: req.body.scrapeOptions,
-        bypassBilling: !isAsyncScraping, // Async mode bills per job, sync mode bills manually
+        bypassBilling: true, // Async mode bills per job, sync mode bills manually
         apiKeyId: req.acuc?.api_key_id ?? null,
       };
 
@@ -362,7 +360,7 @@ export async function searchController(
               },
             });
           } else {
-            logger.info(`Skipping blocked URL: ${item.url}`);
+            logger.info(`Skipping blocked URL [x402]: ${item.url}`);
           }
         });
       }
@@ -383,7 +381,7 @@ export async function searchController(
                 },
               });
             } else {
-              logger.info(`Skipping blocked URL: ${item.url}`);
+              logger.info(`Skipping blocked URL [x402]: ${item.url}`);
             }
           });
       }
@@ -404,7 +402,7 @@ export async function searchController(
                 },
               });
             } else {
-              logger.info(`Skipping blocked URL: ${item.url}`);
+              logger.info(`Skipping blocked URL [x402]: ${item.url}`);
             }
           });
       }
@@ -412,7 +410,7 @@ export async function searchController(
       // Create all promises based on mode (async vs sync)
       const allPromises = itemsToScrape.map(({ scrapeInput }) =>
         isAsyncScraping
-          ? startScrapeJob(
+          ? startX420ScrapeJob(
               scrapeInput,
               scrapeOptions,
               logger,
@@ -420,7 +418,7 @@ export async function searchController(
               directToBullMQ,
               isSearchPreview,
             )
-          : scrapeSearchResult(
+          : scrapeX420SearchResult(
               scrapeInput,
               scrapeOptions,
               logger,
@@ -473,12 +471,12 @@ export async function searchController(
         }
 
         // Don't bill here - let each job bill itself when it completes
-        credits_billed = allJobIds.length; // Just for reporting, not billing
+        credits_billed = 0; // Just for reporting, not billing
 
         const endTime = new Date().getTime();
-        const timeTakenInSeconds = (endTime - middlewareStartTime) / 1000;
+        const timeTakenInSeconds = (endTime - startTime) / 1000;
 
-        logger.info("Logging job (async scraping)", {
+        logger.info("Logging job (async scraping) [x402]", {
           num_docs: credits_billed,
           time_taken: timeTakenInSeconds,
           scrapeIds,
@@ -511,21 +509,6 @@ export async function searchController(
           false,
           isSearchPreview,
         );
-
-        // Log final timing information for async mode
-        const totalRequestTime = new Date().getTime() - middlewareStartTime;
-        const controllerTime = new Date().getTime() - controllerStartTime;
-        logger.info("Search completed successfully (async)", {
-          version: "v2",
-          jobId,
-          middlewareStartTime,
-          controllerStartTime,
-          middlewareTime,
-          controllerTime,
-          totalRequestTime,
-          creditsUsed: credits_billed,
-          scrapeful: shouldScrape,
-        });
 
         return res.status(200).json({
           success: true,
@@ -580,63 +563,15 @@ export async function searchController(
           });
         }
 
-        // Calculate credits
-        const creditPromises = allDocsWithCostTracking.map(
-          async docWithCost => {
-            return await calculateCreditsToBeBilled(
-              req.body.scrapeOptions,
-              {
-                teamId: req.auth.team_id,
-                bypassBilling: true,
-                zeroDataRetention: false,
-              },
-              docWithCost.document,
-              docWithCost.costTracking,
-              req.acuc?.flags ?? null,
-            );
-          },
-        );
-
-        try {
-          const individualCredits = await Promise.all(creditPromises);
-          credits_billed = individualCredits.reduce(
-            (sum, credit) => sum + credit,
-            0,
-          );
-        } catch (error) {
-          logger.error("Error calculating credits for billing", { error });
-          credits_billed = totalResultsCount;
-        }
-
         // Update response with scraped data
         Object.assign(searchResponse, scrapedResponse);
       }
     }
 
-    // Bill team once for all successful results
-    // - For sync scraping: Bill based on actual scraped content
-    // - For async scraping: Jobs handle their own billing
-    // - For no scraping: Bill based on search results count
-    if (
-      !isSearchPreview &&
-      (!shouldScrape || (shouldScrape && !isAsyncScraping))
-    ) {
-      billTeam(
-        req.auth.team_id,
-        req.acuc?.sub_id ?? undefined,
-        credits_billed,
-        req.acuc?.api_key_id ?? null,
-      ).catch(error => {
-        logger.error(
-          `Failed to bill team ${req.acuc?.sub_id} for ${credits_billed} credits: ${error}`,
-        );
-      });
-    }
-
     const endTime = new Date().getTime();
-    const timeTakenInSeconds = (endTime - middlewareStartTime) / 1000;
+    const timeTakenInSeconds = (endTime - startTime) / 1000;
 
-    logger.info("Logging job", {
+    logger.info("Logging job [x402]", {
       num_docs: credits_billed,
       time_taken: timeTakenInSeconds,
     });
@@ -670,23 +605,6 @@ export async function searchController(
       isSearchPreview,
     );
 
-    // Log final timing information
-    const totalRequestTime = new Date().getTime() - middlewareStartTime;
-    const controllerTime = new Date().getTime() - controllerStartTime;
-
-    logger.info("Request metrics", {
-      version: "v2",
-      jobId,
-      mode: "search",
-      middlewareStartTime,
-      controllerStartTime,
-      middlewareTime,
-      controllerTime,
-      totalRequestTime,
-      creditsUsed: credits_billed,
-      scrapeful: shouldScrape,
-    });
-
     // For sync scraping or no scraping, don't include scrapeIds
     return res.status(200).json({
       success: true,
@@ -695,7 +613,7 @@ export async function searchController(
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      logger.warn("Invalid request body", { error: error.errors });
+      logger.warn("Invalid request body [x402]", { error: error.errors });
       return res.status(400).json({
         success: false,
         error: "Invalid request body",
@@ -712,10 +630,7 @@ export async function searchController(
     }
 
     Sentry.captureException(error);
-    logger.error("Unhandled error occurred in search", {
-      version: "v2",
-      error,
-    });
+    logger.error("Unhandled error occurred in search [x402]", { error });
     return res.status(500).json({
       success: false,
       error: error.message,
